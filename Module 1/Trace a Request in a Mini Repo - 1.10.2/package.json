@@ -1,0 +1,21 @@
+{
+  "name": "growlog-mini-repo",
+  "version": "1.0.0",
+  "description": "Growlog Analytics API - Sample Express.js app for tracing request flow",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js"
+  },
+  "keywords": [
+    "analytics",
+    "reporting",
+    "express"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "uuid": "^9.0.0"
+  }
+}
