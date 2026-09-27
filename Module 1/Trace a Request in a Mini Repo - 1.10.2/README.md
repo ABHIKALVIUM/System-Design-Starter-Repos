@@ -70,3 +70,10 @@ curl -H "Authorization: Bearer token-valid-123" http://localhost:3000/reports/1
 ```
 
 You should see the report JSON returned AND `[NOTIFIER] Logged: ...` printed in the server terminal — after the response.
+
+---
+
+## Findings
+
+During the request trace of `GET /reports/:id`, a design drift was identified in `handlers/getReport.js` where the handler directly awaited `notifier.sendAccessLog(...)` before sending the HTTP response. This violated the Single Responsibility Principle (LU 1.5) by adding client latency and coupling report retrieval to notification side-effects; it was fixed by moving the audit logging logic into a dedicated post-response Express middleware (`accessLogger.js`) using `res.on('finish')`.
+
