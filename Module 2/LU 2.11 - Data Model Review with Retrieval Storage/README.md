@@ -190,33 +190,43 @@ git add migrations/001_retrieval_schema.sql README.md
 git commit -m "fix: repair the incident retrieval schema to match the spec"
 ```
 
-2. Update this `README.md` with exactly **3 retrieval-model decisions** and **1 rejected shape**:
+2. Completed **3 retrieval-model decisions** and **1 rejected shape**:
 
-```markdown
 ## Retrieval-Model Decisions
 
-### Decision 1: [Embedding storage decision]
-Spec said: ...
-Schema decided: ...
-Reason: ...
+### Decision 1: Native Vector Column Type (`vector(1536) NOT NULL`) vs Plain Text or Array
+Spec said: `embedding vector(1536) NOT NULL` — the embedding vector (pgvector type).
+Schema decided: Enabled the `vector` extension (`CREATE EXTENSION IF NOT EXISTS vector;`) and declared `incident_chunks.embedding` as `vector(1536) NOT NULL`.
+Reason: Storing high-dimensional embeddings as `TEXT` or `float8[]` breaks retrieval storage in three fundamental ways:
+1. **Distance Operators:** The `<=>` cosine-distance operator in PostgreSQL operates exclusively on native pgvector types. Storing vectors as `TEXT` or arrays eliminates native SQL geometric operators, forcing the application to retrieve raw strings and compute distances in memory.
+2. **Approximate Nearest Neighbor (ANN) Indexing:** `HNSW` indexing requires a native `vector` column paired with an operator class (`vector_cosine_ops`). You cannot build an HNSW index on `TEXT` or `float8[]`, degrading all retrieval queries from $O(\log n)$ to an $O(n)$ full table scan.
+3. **Dimensionality Guarantee:** The `vector(1536)` type strictly enforces at the database constraint layer that every row contains exactly 1,536 dimensions. `TEXT` or arrays allow malformed or mis-dimensioned vectors that silently corrupt vector space arithmetic and similarity rankings. Adding `NOT NULL` prevents unsearchable dead chunks, as an un-embedded chunk can never be retrieved.
 
-### Decision 2: [ON DELETE decision]
-Spec said: ...
-Schema decided: ...
-Reason: ...
+### Decision 2: Foreign Key Cascade Behavior (`ON DELETE CASCADE`) on Derived Data
+Spec said: `incident_id BIGINT NOT NULL REFERENCES incidents(id) ON DELETE CASCADE` — a chunk has no meaning without its incident.
+Schema decided: Declared `incident_id BIGINT NOT NULL REFERENCES incidents(id) ON DELETE CASCADE` on `incident_chunks` along with a supporting B-tree index (`idx_incident_chunks_incident_id`).
+Reason: `incident_chunks` contains derived, cached retrieval representations of authoritative incidents. A chunk has no semantic meaning or lifecycle outside its parent incident:
+1. **Preventing Orphan Vectors:** If `ON DELETE SET NULL` were allowed, deleting an incident would leave orphaned chunks with `NULL` incident IDs in the index. Vector similarity searches would match these chunks and return them to the LLM assistant, citing incidents that no longer exist in the authoritative table (the orphan-vector defect).
+2. **Preventing Deletion Deadlocks:** If `ON DELETE RESTRICT` (or default `NO ACTION`) were used, deleting an incident would fail unless an operator or background worker manually purged all associated chunks first. Derived data must never gate or hold hostage operations on the authoritative source of truth.
+3. **Type Compatibility & Indexing:** `incidents.id` is `BIGSERIAL` (`bigint`), so `incident_id` must match as `BIGINT` to allow foreign key validation. A B-tree index on `incident_id` ensures that cascade deletions and re-embedding sweeps do not perform full scans on `incident_chunks`.
 
-### Decision 3: [Filter-metadata / denormalisation decision]
-Spec said: ...
-Schema decided: ...
-Reason: ...
+### Decision 3: Denormalised Filter Metadata (`team_id` and `severity`) for Hybrid Retrieval
+Spec said: `team_id BIGINT NOT NULL` and `severity TEXT NOT NULL` — denormalised filter metadata.
+Schema decided: Copied `team_id BIGINT NOT NULL` and `severity TEXT NOT NULL` from `incidents` directly into `incident_chunks`.
+Reason: Fireline's retrieval query is hybrid retrieval: "find the 3 most similar past P1 incidents for the same team, excluding the current one, on every incident open."
+1. **Single-Pass Filtered Vector Search:** In PostgreSQL with pgvector, storing relational filter columns (`team_id`, `severity`) directly on `incident_chunks` enables the query planner to apply relational filter predicates (`WHERE team_id = $1 AND severity = $2 AND incident_id <> $3`) and vector similarity ranking (`ORDER BY embedding <=> $4 LIMIT 3`) in a unified, single-table execution plan.
+2. **Eliminating Cross-Table Join Overhead:** If metadata were left normalized solely in `incidents`, every similarity query would require joining millions of candidate vector rows against `incidents` or performing two-phase multi-query retrieval (over-fetching candidates and filtering after the fact). At high frequency (~8,000 queries/min peak), eliminating this join directly protects retrieval latency.
+3. **Explicit Trade-Off:** As established in LU16, denormalisation trades write-path overhead for read-path performance. If an incident's team or severity changes, chunks must be updated or re-embedded. For an incident management platform where incident metadata updates are rare relative to incident opens and retrieval reads, this trade-off is optimal.
 
 ## Rejected Shape
 
-### Shape: [name what you removed or rejected]
-What it was: ...
-Why rejected: ...
-What would break: ...
-```
+### Shape: Single Embedding Column on `incidents` (`ALTER TABLE incidents ADD COLUMN embedding TEXT;`)
+What it was: A single embedding column (`embedding TEXT`) bolted directly onto the authoritative `incidents` table, attempting to represent each entire incident as a single vector.
+Why rejected: Incidents are complex, multi-topic documents spanning multiple paragraphs (e.g., initial alert symptoms, stack traces, investigation steps, hypothesis testing, root cause identification, and mitigation). An embedding vector represents the semantic centroid (average) of the entire input text. Furthermore, embedding models have strict input token limits (e.g., 512–8,192 tokens); long incidents exceed this limit and suffer silent truncation, discarding vital troubleshooting and resolution history.
+What would break: **Retrieval Granularity Failure and Semantic Dilution (Blurred Meaning):**
+1. **Semantic Dilution:** Compressing an entire incident into a single vector averages out specific technical details. When a responder searches with a precise technical symptom (e.g., "Postgres connection pool exhausted under load"), an incident whose root cause or 4th paragraph discusses this exact issue will match poorly because its single vector is dominated by paragraphs describing generic alert timestamps and communication updates.
+2. **Loss of Specificity:** The LLM receives either the whole bloated incident or nothing, losing the ability to cite the exact chunk/paragraph where the resolution was documented.
+3. **Structural Solution:** Splitting the incident into chunks in a dedicated one-to-many `incident_chunks` table gives each chunk its own sharp, topic-specific vector in vector space. Retrieval accurately matches the single most relevant chunk, and its `incident_id` foreign key seamlessly links back to the authoritative parent record.
 
 3. Push and open a PR:
 ```bash
