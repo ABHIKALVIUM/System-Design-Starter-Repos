@@ -17,12 +17,17 @@ const tasks = new Map([
   }]
 ]);
 
-app.get('/tasks/:id/complete', (req, res) => {
+app.patch('/tasks/:id/complete', (req, res) => {
   const taskId = parseInt(req.params.id, 10);
   const task = tasks.get(taskId);
 
   if (!task) {
     return res.status(404).json({ error: 'Task not found' });
+  }
+
+  const apiVersion = req.get('X-API-Version');
+  if (apiVersion === '1.0') {
+    res.set('Deprecation', 'true');
   }
 
   task.status = 'completed';
@@ -33,11 +38,8 @@ app.get('/tasks/:id/complete', (req, res) => {
     task_ref: task.task_ref,
     title: task.title,
     assigned_user_id: task.assigned_user_id,
-    created_by_user_id_fk: task.created_by_user_id_fk,
-    internal_priority_score: task.internal_priority_score,
     project_id: task.project_id,
-    completed_at: task.completed_at,
-    internal_db_version: task.internal_db_version
+    completed_at: task.completed_at
   });
 });
 

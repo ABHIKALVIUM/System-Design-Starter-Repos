@@ -139,3 +139,10 @@ There is no single right answer for most of these assignments. Strong submission
 **If you think something in the repo is broken** (a file is missing, a link is dead, the code does not run when it should): raise it with your mentor immediately, not after you submit. Do not assume the broken thing is part of the puzzle.
 
 **If you are not sure whether your solution is correct:** submit it anyway and explain your uncertainty in the PR description. A submission that says "I chose X over Y because Z, but I am not confident about the edge case where..." is far better than no submission.
+
+---
+
+## Identification of Violations
+
+The three design violations were identified by auditing the OpenAPI specification and Express implementation against core REST principles: HTTP GET was inappropriately used for a state-mutating operation, internal database columns and scoring logic were leaked across the public boundary, and breaking contract changes lacked explicit version negotiation and deprecation headers.
+
