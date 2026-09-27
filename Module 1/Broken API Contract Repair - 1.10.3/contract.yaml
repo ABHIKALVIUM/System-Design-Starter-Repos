@@ -1,0 +1,69 @@
+openapi: 3.0.0
+info:
+  title: Helios Task Management API
+  version: 2.0.0
+  description: |
+    Repaired contract for the Helios task completion endpoint.
+
+paths:
+  /tasks/{id}/complete:
+    patch:
+      summary: Complete a task
+      description: |
+        Marks a task as completed via partial state update.
+      operationId: completeTask
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The task ID to complete
+        - name: X-API-Version
+          in: header
+          required: false
+          schema:
+            type: string
+            default: '2.0'
+            enum:
+              - '1.0'
+              - '2.0'
+          description: API version requested by client (default 2.0; 1.0 is deprecated)
+      responses:
+        '200':
+          description: Task completed successfully
+          headers:
+            Deprecation:
+              schema:
+                type: string
+              description: Set to 'true' when accessing deprecated API version 1.0
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                    description: Task ID
+                  task_ref:
+                    type: string
+                  title:
+                    type: string
+                  assigned_user_id:
+                    type: integer
+                  project_id:
+                    type: integer
+                  completed_at:
+                    type: string
+                    format: date-time
+              example:
+                id: 42
+                task_ref: TSK-2024-001
+                title: Fix login form validation
+                assigned_user_id: 7
+                project_id: 12
+                completed_at: '2024-05-19T14:32:00Z'
+        '400':
+          description: Task ID is missing or invalid
+        '404':
+          description: Task not found
